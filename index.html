@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <title>Face Tracking su GitHub Pages</title>
+
+  <!-- Librerie necessarie -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@3.9.0/dist/tf-core.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@3.9.0/dist/tf-converter.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@3.9.0/dist/tf-backend-webgl.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@0.0.3/dist/face-landmarks-detection.min.js"></script>
+
+  <style>
+    body, html {
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+      font-family: Arial, sans-serif;
+    }
+    /* Cornice 3D */
+    #frame {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 80vw;
+      height: 80vh;
+      border: 5px solid #333;
+      pointer-events: none;
+    }
+    /* Pannello controlli */
+    #controls {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.5);
+      color: #fff;
+      padding: 10px;
+      border-radius: 8px;
+      width: 400px;
+      max-width: 90%;
+      z-index: 10;
+    }
+    #controls input, #controls button {
+      width: 100%;
+      margin-top: 5px;
+    }
+    /* Webcam nascosta (se vuoi debug, togli display:none) */
+    #webcam {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+  <!-- Cornice 3D -->
+  <div id="frame"></div>
+
+  <!-- Pannello di controllo -->
+  <div id="controls">
+    Zoom: <span id="zoomValue">300</span>
+    <input type="range" id="zoomFactor" min="100" max="1500" value="300">
+
+    Camera X:
+    <input type="range" id="cameraX" min="-5" max="5" step="0.01" value="0">
+
+    Camera Y:
+    <input type="range" id="cameraY" min="-5" max="5" step="0.01" value="0">
+
+    Camera Z:
+    <input type="range" id="cameraZ" min="-5" max="5" step="0.01" value="0.1">
+
+    Carica immagine/video:
+    <!-- Disabilitato finché non carichiamo modello e webcam -->
+    <input type="file" id="fileInput" disabled>
+
+    <button id="resetView">Reset Vista</button>
+  </div>
+
+  <!-- Video webcam -->
+  <video id="webcam" autoplay muted playsinline></video>
+
+  <!-- Script integrato -->
+  <script>
+    // Variabili globali
+    let scene, camera, renderer, sphere, texture;
+    let zoom = 300, camX = 0, camY = 0, camZ = 0.1;
+    let model, webcam;
+
+    // Carica FaceMesh
+    async function setupModel() {
+      console.log(">> Inizio setupModel()");
+      model = await faceLandmarksDetection.createDetector(
+        faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
+        { runtime: 'tfjs', refineLandmarks: true, maxFaces: 1 }
+      );
+      console.log(">> Modello FaceMesh caricato correttamente.");
+    }
+
+    // Attiva la webcam
+    async function setupWebcam() {
+      console.log(">> Inizio setupWebcam()");
+      webcam = document.getElementById('webcam');
+      const constraints = { video: { width: 640, height: 480, facingMode: 'user' } };
+
+      webcam.srcObject = await navigator.mediaDevices.getUserMedia(constraints);
+      await new Promise(resolve => webcam.onloadedmetadata = resolve);
+      webcam.play();
+      console.log(">> Webcam pronta e in riproduzione.");
+    }
+
+    // Crea la scena 3D
+    function initScene() {
+      console.log(">> Inizio initScene()");
+      scene = new THREE.Scene();
+
+      camera = new THREE.PerspectiveCamera(zoom / 10, window.innerWidth / window.innerHeight, 0.01, 1000);
+      camera.position.set(camX, camY, camZ);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      // Sfera
+      sphere = new THREE.Mesh(
+        new THREE.SphereGeometry(5, 64, 64),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
+      );
+      scene.add(sphere);
+
+      console.log(">> Sfera creata:", sphere);
+      animate();
+    }
+
+    // Rendering
+    function animate() {
+      camera.fov = zoom / 10;
+      camera.position.set(camX, camY, camZ);
+      camera.updateProjectionMatrix();
+
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    }
+
+    // Tracking: muove la camera in base al naso
+    async function trackFace() {
+      const faces = await model.estimateFaces(webcam);
+      if (faces.length > 0) {
+        const nose = faces[0].keypoints[1];
+        camX = (nose.x - webcam.videoWidth / 2) * 0.01;
+        camY = -(nose.y - webcam.videoHeight / 2) * 0.01;
+      }
+      requestAnimationFrame(trackFace);
+    }
+
+    // Avvio
+    async function start() {
+      try {
+        console.log(">> Inizio start()");
+        await setupModel();
+        console.log(">> Modello caricato");
+        await setupWebcam();
+        console.log(">> Webcam attivata");
+        initScene();
+        console.log(">> Scena inizializzata, sfera creata");
+        trackFace();
+        console.log(">> Tracking avviato");
+
+        // Abilita caricamento file
+        const fileInputEl = document.getElementById('fileInput');
+        fileInputEl.disabled = false;
+        console.log(">> Pulsante file abilitato");
+      } catch (err) {
+        console.error("Errore durante l'avvio:", err);
+        alert("Si è verificato un errore durante l'avvio. Guarda la console per dettagli.");
+      }
+    }
+
+    start();
+
+    // Slider
+    document.getElementById('zoomFactor').oninput = e => {
+      zoom = parseFloat(e.target.value);
+      document.getElementById('zoomValue').innerText = zoom;
+    };
+    document.getElementById('cameraX').oninput = e => camX = parseFloat(e.target.value);
+    document.getElementById('cameraY').oninput = e => camY = parseFloat(e.target.value);
+    document.getElementById('cameraZ').oninput = e => camZ = parseFloat(e.target.value);
+
+    // Caricamento file
+    document.getElementById('fileInput').addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = evt => {
+        if (texture) {
+          texture.dispose();
+          texture = null;
+        }
+        if (file.type.startsWith('video')) {
+          const vid = document.createElement('video');
+          vid.src = evt.target.result;
+          vid.loop = true;
+          vid.muted = true;
+          vid.autoplay = true;
+          vid.play();
+          texture = new THREE.VideoTexture(vid);
+        } else {
+          texture = new THREE.TextureLoader().load(evt.target.result);
+        }
+        console.log(">> Carico texture su sfera:", file.name);
+        sphere.material.map = texture;
+        sphere.material.needsUpdate = true;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // Reset
+    document.getElementById('resetView').onclick = () => {
+      zoom = 300; 
+      camX = 0; 
+      camY = 0; 
+      camZ = 0.1;
+
+      document.getElementById('zoomFactor').value = zoom;
+      document.getElementById('zoomValue').innerText = zoom;
+      document.getElementById('cameraX').value = camX;
+      document.getElementById('cameraY').value = camY;
+      document.getElementById('cameraZ').value = camZ;
+
+      console.log(">> Vista resettata.");
+    };
+
+    // Resize
+    window.onresize = () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+  </script>
+</body>
+</html>
